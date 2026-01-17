@@ -1,28 +1,46 @@
--- This Source Code Form is subject to the terms of the bCDDL, v. 1.1.
--- If a copy of the bCDDL was not distributed with this
--- file, You can obtain one at http://beamng.com/bCDDL-1.1.txt
-
 local M = {}
 
 M.dependencies = {"career_career"}
 
-local computerTetherRangeSphere = 4 --meter
-local computerTetherRangeBox = 1 --meter
+local computerTetherRangeSphere = 4
+local computerTetherRangeBox = 1
 local tether
 
 local computerFunctions
 local computerId
 local computerFacilityName
 local menuData = {}
+local aiSelection = { active = false, title = "", rows = {}, onSelect = nil }
+
+local function reopenMenu()
+	career_career.closeAllMenus()
+	extensions.core_jobsystem.create(function(job)
+		job.sleep(0.1)                -- waits a tenth of a second (adjust if needed)
+		career_modules_computer.openComputerMenuById(computerId)
+	end)
+end
+
+local function openSelection(title, rows, onSelect)
+  aiSelection.active = true
+  aiSelection.title = title
+  aiSelection.rows = rows or {}
+  aiSelection.onSelect = function(val)
+    aiSelection.active = false
+    if onSelect then onSelect(val) end
+    reopenMenu()
+  end
+end
 
 local function openMenu(computerFacility, resetActiveVehicleIndex, activityElement)
   computerFunctions = {general = {}, vehicleSpecific = {}}
   computerId = computerFacility.id
   computerFacilityName = computerFacility.name
 
+  local AIWorkerManager = require("career/modules/AIWorkerManager")
+  AIWorkerManager.loadState()
+
   menuData = {vehiclesInGarage = {}, resetActiveVehicleIndex = resetActiveVehicleIndex}
   local inventoryIds = career_modules_inventory.getInventoryIdsInClosestGarage()
-
   for _, inventoryId in ipairs(inventoryIds) do
     local vehicleData = {}
     vehicleData.inventoryId = inventoryId
@@ -31,8 +49,8 @@ local function openMenu(computerFacility, resetActiveVehicleIndex, activityEleme
     vehicleData.vehicleName = vehicleInfo and vehicleInfo.niceName
     vehicleData.dirtyDate = vehicleInfo and vehicleInfo.dirtyDate
     table.insert(menuData.vehiclesInGarage, vehicleData)
-
     computerFunctions.vehicleSpecific[inventoryId] = {}
+    -- No need for lockout logic here! It's all handled in inventory.lua now.
   end
 
   menuData.computerFacility = computerFacility
@@ -44,13 +62,208 @@ local function openMenu(computerFacility, resetActiveVehicleIndex, activityEleme
 
   extensions.hook("onComputerAddFunctions", menuData, computerFunctions)
 
-  --local computerPos = freeroam_facilities.getAverageDoorPositionForFacility(computerFacility)
-  local door = computerFacility.doors[1]
+  computerFunctions.general["hireAIWorker"] = {
+    id = "hireAIWorker",
+    label = "Hire Worker",
+    icon = "star",
+    order = 211,
+    callback = function()
+      local candidates = AIWorkerManager.listPotentialHires()
+      local rows = {}
+      for _,cand in ipairs(candidates) do
+        rows[#rows+1] = {
+          label = string.format("%s | Wage: %.0f%% | Skill: %.0f%% | Reliab: %.0f%% | $%d",
+            cand.name, cand.wagePercent*100, cand.skill*100, cand.reliability*100, cand.cost),
+          value = cand.name,
+          icon  = "star"
+        }
+      end
+      openSelection("Choose New Worker to Hire", rows, function(selName)
+        if not selName then return end
+        local ok,msg = AIWorkerManager.hireWorkerNamed(selName)
+        ui_message(msg, 7, "career")
+		career_career.closeAllMenus()
+		extensions.core_jobsystem.create(function(job)
+			job.sleep(0.1)                -- waits a tenth of a second (adjust if needed)
+			career_modules_computer.openComputerMenuById(computerId)
+		end)
+      end)
+    end
+  }
+
+  computerFunctions.general["fireAIWorker"] = {
+    id = "fireAIWorker",
+    label = "Fire Worker",
+    icon = "undo",
+    order = 212,
+    callback = function()
+      local current = AIWorkerManager.listFirableWorkers()
+      if #current == 0 then ui_message("No workers hired.",6,"career") return end
+      local rows = {}
+      for _,w in ipairs(current) do
+        rows[#rows+1] = {
+          label = string.format("%s | Wage %.0f%% | Skill %.0f%% | Reliab %.0f%%",
+                  w.name, w.wagePercent*100, w.skill*100, w.reliability*100),
+          value = w.name,
+          icon  = "user"
+        }
+      end
+      openSelection("Select Worker to Fire", rows, function(workerName)
+        local ok,msg = AIWorkerManager.fireWorker(workerName)
+        ui_message(msg,9,"career")
+        career_career.closeAllMenus()
+		extensions.core_jobsystem.create(function(job)
+			job.sleep(0.1)                -- waits a tenth of a second (adjust if needed)
+			career_modules_computer.openComputerMenuById(computerId)
+		end)
+      end)
+    end
+  }
+
+  computerFunctions.general["assignAIToVehicle"] = {
+    id = "assignAIToVehicle",
+    label = "Assign Worker to Vehicle",
+    icon = "car",
+    order = 213,
+    callback = function()
+      local ai = AIWorkerManager.listFirableWorkers()
+      if #ai == 0 then ui_message("No workers available.",6,"career") return end
+      local assignments = AIWorkerManager.getAssignments()
+      local vehicles = {}
+      for vid, v in pairs(career_modules_inventory.getVehicles()) do
+        if not assignments[vid] then
+          vehicles[#vehicles+1] = {id=vid, name=v.niceName or tostring(vid), type=v.type or "car"}
+        end
+      end
+      if #vehicles == 0 then ui_message("No vehicles available.",6,"career") return end
+      local workerRows = {}
+      for _,w in ipairs(ai) do
+        workerRows[#workerRows+1] = {
+          label = string.format("%s | Wage %.0f%% | Skill %.0f%% | Reliab %.0f%%",
+                  w.name, w.wagePercent*100, w.skill*100, w.reliability*100),
+          value = w.name,
+          icon  = "user"
+        }
+      end
+      openSelection("Assign Worker", workerRows, function(workerSel)
+        local vehRows = {}
+        for _,v in ipairs(vehicles) do
+          vehRows[#vehRows+1] = {
+            label = v.name .. " ("..v.type..")",
+            value = v.id,
+            icon  = "car"
+          }
+        end
+        openSelection("Assign "..workerSel.." to Vehicle", vehRows, function(carSel)
+          local vdata = career_modules_inventory.getVehicles()[carSel]
+          local ok,msg = AIWorkerManager.assignWorkerToVehicle(workerSel, carSel, (vdata and vdata.type) or "car")
+          ui_message(msg,8,"career")
+          career_career.closeAllMenus()
+		  extensions.core_jobsystem.create(function(job)
+			job.sleep(0.1)                -- waits a tenth of a second (adjust if needed)
+			career_modules_computer.openComputerMenuById(computerId)
+		  end)
+        end)
+      end)
+    end
+  }
+
+  computerFunctions.general["recallAIAssignment"] = {
+    id = "recallAIAssignment",
+    label = "Recall Worker from Vehicle",
+    icon = "undo",
+    order = 214,
+    callback = function()
+      local assignments = AIWorkerManager.getAssignments()
+      local vids = {}
+      for vid,_ in pairs(assignments) do vids[#vids+1]=vid end
+      if #vids==0 then ui_message("No AI assignments found.",8,"career") return end
+      local vehRows = {}
+      for _,vid in ipairs(vids) do
+        local v = career_modules_inventory.getVehicles()[vid]
+        local txt = (v and v.niceName or tostring(vid)).." (assigned to "..assignments[vid].worker..")"
+        vehRows[#vehRows+1] = {
+          label = txt,
+          value = vid,
+          icon = "car"
+        }
+      end
+      openSelection("Recall Assignment", vehRows, function(vid)
+        local ok, data = AIWorkerManager.unassignWorkerFromVehicle(vid)
+        if ok then
+          if data.netIncome and career_modules_payment then
+            career_modules_payment.reward({money={amount=math.floor(data.netIncome)}},{label="AI earnings"})
+          end
+          ui_message(data.message or "AI assignment ended.",10,"career")
+        else
+          ui_message(data or "Could not recall.",10,"career")
+        end
+			career_career.closeAllMenus()
+			extensions.core_jobsystem.create(function(job)
+				job.sleep(0.1)                -- waits a tenth of a second (adjust if needed)
+				career_modules_computer.openComputerMenuById(computerId)
+			end)
+      end)
+    end
+  }
+
+  computerFunctions.general["listAIWorkers"] = {
+    id = "listAIWorkers",
+    label = "List All Workers",
+    icon = "users",
+    order = 215,
+    callback = function()
+      ui_message(AIWorkerManager.listWorkers(), 9, "career")
+    end
+  }
+
+  computerFunctions.general["listAssignments"] = {
+    id = "listAssignments",
+    label = "List AI Assignments",
+    icon = "clipboard",
+    order = 216,
+    callback = function()
+      ui_message(AIWorkerManager.listVehicleAssignments(career_modules_inventory.getVehicles()), 10, "career")
+    end
+  }
+
+  if aiSelection.active and aiSelection.rows and #aiSelection.rows > 0 then
+    computerFunctions.general["ai_back"] = {
+      id = "ai_back",
+      label = "Back",
+      icon = "arrow-left",
+      order = 100,
+      callback = function()
+        aiSelection.active = false
+        reopenMenu()
+      end,
+    }
+    computerFunctions.general["ai_header"] = {
+      id = "ai_header",
+      label = aiSelection.title,
+      icon = "clipboard",
+      order = 101,
+      callback = function() end,
+    }
+    for i,row in ipairs(aiSelection.rows) do
+      local btnId = "ai_select_"..i
+      computerFunctions.general[btnId] = {
+        id = btnId,
+        label = row.label,
+        icon  = row.icon or "clipboard",
+        order = 101 + i,
+        callback = function() aiSelection.onSelect(row.value) end
+      }
+    end
+  end
+
+  local computerPos = freeroam_facilities.getAverageDoorPositionForFacility(computerFacility)
+  local door = computerFacility.doors and computerFacility.doors[1]
   tether = nil
   if door then
     tether = career_modules_tether.startDoorTether(door, computerTetherRangeBox, M.closeMenu)
   end
-  if not tether then
+  if not tether and computerPos then
     tether = career_modules_tether.startSphereTether(computerPos, computerTetherRangeSphere, M.closeMenu)
   end
 
@@ -65,24 +278,21 @@ local function computerButtonCallback(buttonId, inventoryId)
   else
     functionData = computerFunctions.general[buttonId]
   end
-
-  functionData.callback(computerId)
+  if functionData and functionData.callback then
+    functionData.callback(computerId)
+  end
 end
 
 local function getComputerUIData()
   local data = {}
   local invVehicles = career_modules_inventory.getVehicles()
-
   local computerFunctionsForUI = deepcopy(computerFunctions)
   computerFunctionsForUI.vehicleSpecific = {}
-
-  -- convert keys of the table to string, because js doesnt support number keys
   for inventoryId, computerFunction in pairs(computerFunctions.vehicleSpecific) do
     if invVehicles and invVehicles[inventoryId] then
       computerFunctionsForUI.vehicleSpecific[tostring(inventoryId)] = computerFunction
     end
   end
-
   local vehiclesForUI = {}
   for _, vehicleData in ipairs(menuData.vehiclesInGarage) do
     local invId = vehicleData.inventoryId
@@ -96,7 +306,6 @@ local function getComputerUIData()
       table.insert(vehiclesForUI, vd)
     end
   end
-
   data.computerFunctions = computerFunctionsForUI
   data.vehicles = vehiclesForUI
   data.facilityName = computerFacilityName
@@ -113,25 +322,17 @@ local function closeMenu()
   career_career.closeAllMenus()
 end
 
-local function openComputerMenuById(computerId)
-  local computer = freeroam_facilities.getFacility("computer", computerId)
-  career_modules_computer.openMenu(computer)
+local function openComputerMenuById(id)
+  local computer = freeroam_facilities.getFacility("computer", id)
+  M.openMenu(computer)
 end
 
 M.reasons = {
-  tutorialActive = {
-    type = "text",
-    label = "Disabled during tutorial."
-  },
-  needsRepair = {
-    type = "needsRepair",
-    label = "The vehicle needs to be repaired first."
-  }
+  tutorialActive = { type = "text", label = "Disabled during tutorial." },
+  needsRepair    = { type = "needsRepair", label = "The vehicle needs to be repaired first." }
 }
 
-local function getComputerId()
-  return computerId
-end
+local function getComputerId() return computerId end
 
 M.openMenu = openMenu
 M.openComputerMenuById = openComputerMenuById
@@ -142,4 +343,3 @@ M.computerButtonCallback = computerButtonCallback
 M.getComputerId = getComputerId
 
 return M
-
