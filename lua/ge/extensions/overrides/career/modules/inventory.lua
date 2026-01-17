@@ -9,7 +9,9 @@ M.dependencies = {'career_career', "career_modules_log", "render_renderViews", "
 local dateUtils = require('utils/dateUtils')
 local parking = require('gameplay/parking')
 local freeroam_facilities = require('freeroam/facilities')
-local AIWorkerManager_ok, AIWorkerManager = pcall(require, "career/modules/AIWorkerManager")
+-- Load AIWorkerManager inside functions to avoid circular dependencies at file scope
+-- This ensures the module is only required when actually needed
+local AIWorkerManager_ok, AIWorkerManager = false, nil
 
 local minimumVersion = 42
 local defaultVehicle = {model = "covet", config = "DXi_M"}
@@ -70,6 +72,7 @@ local function getClosestOwnedGarageWithSpace(pos, levelName)
   if not garageManager then return nil end
 
   -- 1. Check computer link first - this is the highest priority
+  -- Defensive check: only access computerId if career_modules_computer is loaded
   if career_modules_computer and career_modules_computer.getComputerId then
     local currentCompId = career_modules_computer.getComputerId()
     if currentCompId then
@@ -1117,6 +1120,10 @@ local function getVehicleUiData(inventoryId, inventoryIdsInGarage)
   if not vehicleData then return end
 
   -- AI Worker assignment marker for UI (makes vehicle name say "[IN USE]")
+  -- Load AIWorkerManager only when needed to check assignments
+  if not AIWorkerManager_ok then
+    AIWorkerManager_ok, AIWorkerManager = pcall(require, "career/modules/AIWorkerManager")
+  end
   local aiAssignments = {}
   if AIWorkerManager_ok and AIWorkerManager and AIWorkerManager.getAssignments then
     local ok, result = pcall(AIWorkerManager.getAssignments)
@@ -1375,10 +1382,21 @@ local function closeMenu()
     closeMenuCallback()
   else
     career_career.closeAllMenus()
-	extensions.core_jobsystem.create(function(job)
-		job.sleep(0.1)                -- waits a tenth of a second (adjust if needed)
-		career_modules_computer.openComputerMenuById(computerId)
-	end)
+    -- Defensive check: only reopen computer menu if career_modules_computer is loaded
+    -- and computerId is valid. This prevents errors if the menu is closed before
+    -- the computer module is fully initialized or if no computer is active.
+    if career_modules_computer and career_modules_computer.getComputerId and career_modules_computer.openComputerMenuById then
+      local currentComputerId = career_modules_computer.getComputerId()
+      if currentComputerId then
+        extensions.core_jobsystem.create(function(job)
+          job.sleep(0.1)  -- Brief delay to allow UI state to settle
+          -- Double-check the computer module is still available
+          if career_modules_computer and career_modules_computer.openComputerMenuById then
+            career_modules_computer.openComputerMenuById(currentComputerId)
+          end
+        end)
+      end
+    end
   end
 end
 
@@ -1436,7 +1454,10 @@ local function openMenuFromComputer(_originComputerId)
     {
       {
 		callback = function(inventoryId)
-			local AIWorkerManager_ok, AIWorkerManager = pcall(require, "career/modules/AIWorkerManager")
+			-- Load AIWorkerManager only when needed for assignment checks
+			if not AIWorkerManager_ok then
+				AIWorkerManager_ok, AIWorkerManager = pcall(require, "career/modules/AIWorkerManager")
+			end
 			local aiAssignments = {}
 			if AIWorkerManager_ok and AIWorkerManager and AIWorkerManager.getAssignments then
 				local ok, result = pcall(AIWorkerManager.getAssignments)
