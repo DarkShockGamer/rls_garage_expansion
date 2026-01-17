@@ -21,6 +21,7 @@ local function openSelection(title, rows, onSelect)
 end
 
 local function gotoAIWorkerMenu(computerId)
+  print("[aiWorkerComputerPage.lua] gotoAIWorkerMenu() called with computerId: " .. tostring(computerId))
   parentId = computerId
   computerFunctions = {}
 
@@ -256,6 +257,7 @@ function M.goBack()
 end
 
 function M.openAIWorkerPage(computerId)
+  print("[aiWorkerComputerPage.lua] openAIWorkerPage() called with computerId: " .. tostring(computerId))
   gotoAIWorkerMenu(computerId)
 end
 

@@ -76,6 +76,7 @@ local function openMenu(computerFacility, resetActiveVehicleIndex, activityEleme
     icon = "users",
     order = 210,
     callback = function()
+      print("[computer.lua] Workers button clicked - opening AI worker management page")
       -- Load the AI worker computer page module and open it
       local aiWorkerPage = require("career/modules/aiWorkerComputerPage")
       aiWorkerPage.openAIWorkerPage(computerId)
