@@ -12,14 +12,33 @@ local computerFacilityName
 local menuData = {}
 local aiSelection = { active = false, title = "", rows = {}, onSelect = nil }
 
+-- Defensive menu reopening: only reopen if computerId is valid and not already in a reopen cycle.
+-- This prevents infinite loops and ensures the menu only refreshes in response to user actions.
+local reopenInProgress = false
 local function reopenMenu()
+	if reopenInProgress then
+		-- Prevent overlapping/recursive reopenMenu calls
+		return
+	end
+	if not computerId then
+		-- Defensive check: if computerId is nil, we cannot reopen the menu
+		return
+	end
+	reopenInProgress = true
 	career_career.closeAllMenus()
 	extensions.core_jobsystem.create(function(job)
-		job.sleep(0.1)                -- waits a tenth of a second (adjust if needed)
-		career_modules_computer.openComputerMenuById(computerId)
+		job.sleep(0.1)  -- Brief delay to allow UI state to settle
+		-- Double-check computerId is still valid before reopening
+		if computerId then
+			career_modules_computer.openComputerMenuById(computerId)
+		end
+		reopenInProgress = false
 	end)
 end
 
+-- openSelection creates a UI overlay for selecting from a list (workers, vehicles, etc.)
+-- The onSelect callback is wrapped to clear the selection state and reopen the menu.
+-- This ensures that AI assignment actions cause the menu to refresh only after user interaction.
 local function openSelection(title, rows, onSelect)
   aiSelection.active = true
   aiSelection.title = title
@@ -27,6 +46,7 @@ local function openSelection(title, rows, onSelect)
   aiSelection.onSelect = function(val)
     aiSelection.active = false
     if onSelect then onSelect(val) end
+    -- Reopen menu after selection to show updated state
     reopenMenu()
   end
 end
@@ -36,6 +56,8 @@ local function openMenu(computerFacility, resetActiveVehicleIndex, activityEleme
   computerId = computerFacility.id
   computerFacilityName = computerFacility.name
 
+  -- Load AIWorkerManager inside function scope to avoid circular dependencies
+  -- This ensures the module is only required when the menu is actually opened
   local AIWorkerManager = require("career/modules/AIWorkerManager")
   AIWorkerManager.loadState()
 
@@ -82,11 +104,7 @@ local function openMenu(computerFacility, resetActiveVehicleIndex, activityEleme
         if not selName then return end
         local ok,msg = AIWorkerManager.hireWorkerNamed(selName)
         ui_message(msg, 7, "career")
-		career_career.closeAllMenus()
-		extensions.core_jobsystem.create(function(job)
-			job.sleep(0.1)                -- waits a tenth of a second (adjust if needed)
-			career_modules_computer.openComputerMenuById(computerId)
-		end)
+        -- Menu will be reopened by openSelection's onSelect wrapper
       end)
     end
   }
@@ -111,11 +129,7 @@ local function openMenu(computerFacility, resetActiveVehicleIndex, activityEleme
       openSelection("Select Worker to Fire", rows, function(workerName)
         local ok,msg = AIWorkerManager.fireWorker(workerName)
         ui_message(msg,9,"career")
-        career_career.closeAllMenus()
-		extensions.core_jobsystem.create(function(job)
-			job.sleep(0.1)                -- waits a tenth of a second (adjust if needed)
-			career_modules_computer.openComputerMenuById(computerId)
-		end)
+        -- Menu will be reopened by openSelection's onSelect wrapper
       end)
     end
   }
@@ -158,11 +172,7 @@ local function openMenu(computerFacility, resetActiveVehicleIndex, activityEleme
           local vdata = career_modules_inventory.getVehicles()[carSel]
           local ok,msg = AIWorkerManager.assignWorkerToVehicle(workerSel, carSel, (vdata and vdata.type) or "car")
           ui_message(msg,8,"career")
-          career_career.closeAllMenus()
-		  extensions.core_jobsystem.create(function(job)
-			job.sleep(0.1)                -- waits a tenth of a second (adjust if needed)
-			career_modules_computer.openComputerMenuById(computerId)
-		  end)
+          -- Menu will be reopened by openSelection's onSelect wrapper
         end)
       end)
     end
@@ -198,11 +208,7 @@ local function openMenu(computerFacility, resetActiveVehicleIndex, activityEleme
         else
           ui_message(data or "Could not recall.",10,"career")
         end
-			career_career.closeAllMenus()
-			extensions.core_jobsystem.create(function(job)
-				job.sleep(0.1)                -- waits a tenth of a second (adjust if needed)
-				career_modules_computer.openComputerMenuById(computerId)
-			end)
+        -- Menu will be reopened by openSelection's onSelect wrapper
       end)
     end
   }
