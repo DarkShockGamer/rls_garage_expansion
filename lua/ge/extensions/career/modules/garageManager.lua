@@ -1,5 +1,5 @@
 local M = {}
-M.dependencies = { 'career_career', 'career_saveSystem', 'freeroam_facilities' }
+M.dependencies = { 'career_career', 'career_saveSystem', 'freeroam_facilities', 'career_modules_garageExpansions' }
 
 local purchasedGarages = {}
 local discoveredGarages = {}
@@ -7,6 +7,13 @@ local garageToPurchase = nil
 local saveFile = "purchasedGarages.json"
 
 local garageSize = {}
+
+local function getExpansionBonusSlots(garageId)
+  if career_modules_garageExpansions and career_modules_garageExpansions.getBonusSlots then
+    return career_modules_garageExpansions.getBonusSlots(garageId) or 0
+  end
+  return 0
+end
 
 local function savePurchasedGarages(currentSavePath)
   if not currentSavePath then
@@ -19,7 +26,7 @@ local function savePurchasedGarages(currentSavePath)
   if not FS:directoryExists(dirPath) then
     FS:directoryCreate(dirPath)
   end
-  
+
   local data = {
     garages    = purchasedGarages,
     discovered = discoveredGarages
@@ -29,7 +36,6 @@ local function savePurchasedGarages(currentSavePath)
 end
 
 local function onSaveCurrentSaveSlot(currentSavePath)
-  -- This is the correct handler that will save to the new autosave
   print("Saving Garage Data to: " .. currentSavePath .. "/career/rls_career/" .. saveFile)
   savePurchasedGarages(currentSavePath)
 end
@@ -51,18 +57,19 @@ end
 
 local function buildGarageSizes()
   local garages = freeroam_facilities.getFacilitiesByType("garage")
-  
   if garages then
     for _, garage in pairs(garages) do
       if purchasedGarages[garage.id] then
-        garageSize[tostring(garage.id)] = (math.ceil(garage.capacity / (career_modules_hardcore.isHardcoreMode() and 2 or 1)) or 0)
+        local base = (math.ceil(garage.capacity / (career_modules_hardcore.isHardcoreMode() and 2 or 1)) or 0)
+        local bonus = getExpansionBonusSlots(garage.id)
+        garageSize[tostring(garage.id)] = base + bonus
       end
     end
   end
 end
 
 local function addPurchasedGarage(garageId)
-  if purchasedGarages == {} then
+  if next(purchasedGarages) == nil then
     print("Showing non-tutorial welcome splashscreen")
     career_modules_linearTutorial.showNonTutorialWelcomeSplashscreen()
   end
@@ -87,20 +94,17 @@ end
 
 local function purchaseDefaultGarage()
   if career_career.hardcoreMode or career_modules_hardcore.isHardcoreMode() then return end
-  
-  -- Check if challenge has starting garages
+
   if career_challengeModes and career_challengeModes.isChallengeActive() then
     local activeChallenge = career_challengeModes.getActiveChallenge()
     if activeChallenge and activeChallenge.startingGarages and #activeChallenge.startingGarages > 0 then
-      -- Challenge has starting garages, don't purchase default starter garage
       log("D", "garageManager", "purchaseDefaultGarage: Skipping default garage purchase - challenge has starting garages: " .. dumps(activeChallenge.startingGarages))
       return
     end
   end
-  
-  -- Only purchase default starter garage if no challenge starting garages are selected
+
   local garages = freeroam_facilities.getFacilitiesByType("garage")
-  if not garages or #garages == 0 then return end  -- Return if no garages
+  if not garages or #garages == 0 then return end
   for _, garage in ipairs(garages) do
     if garage.starterGarage then
       log("D", "garageManager", "purchaseDefaultGarage: Purchasing default starter garage: " .. garage.id)
@@ -126,18 +130,17 @@ local function loadPurchasedGarages()
   if not career_career.isActive() then return end
   local _, currentSavePath = career_saveSystem.getCurrentSaveSlot()
   if not currentSavePath then return end
-  
+
   local filePath = currentSavePath .. "/career/rls_career/" .. saveFile
   local data = jsonReadFile(filePath) or {}
   purchasedGarages = data.garages or {}
   discoveredGarages = data.discovered or {}
-  -- Check general data
+
   if career_career.hardcoreMode then
     purchasedGarages = {}
     discoveredGarages = {}
   end
 
-  -- If we have an active challenge with starting garages, ensure they are purchased
   if career_challengeModes and career_challengeModes.isChallengeActive() then
     local activeChallenge = career_challengeModes.getActiveChallenge()
     if activeChallenge and activeChallenge.startingGarages and #activeChallenge.startingGarages > 0 then
@@ -170,14 +173,12 @@ local function getGaragePrice(garage)
   if career_modules_hardcore.isHardcoreMode() then
     return garage.defaultPrice
   else
-    -- Check if this garage is a starting garage in an active challenge FIRST
     if career_challengeModes and career_challengeModes.isChallengeActive() then
       local activeChallenge = career_challengeModes.getActiveChallenge()
       if activeChallenge and activeChallenge.startingGarages then
         return garage.defaultPrice
       end
     end
-    
     return garage.starterGarage and 0 or garage.defaultPrice
   end
 end
@@ -210,12 +211,13 @@ local function requestGarageData()
     if translateLanguage(garage.name, garage.name, true) then
       garage.name = translateLanguage(garage.name, garage.name, true)
     end
-    local garageData = {
+    local baseCapacity = math.ceil(garage.capacity / (career_modules_hardcore.isHardcoreMode() and 2 or 1))
+    local capWithBonus = baseCapacity + getExpansionBonusSlots(garage.id)
+    return {
       name = garage.name,
       price = getGaragePrice(garage),
-      capacity = math.ceil(garage.capacity / (career_modules_hardcore.isHardcoreMode() and 2 or 1))
+      capacity = capWithBonus
     }
-    return garageData
   end
   return nil
 end
@@ -254,13 +256,13 @@ end
 local function getStoredLocations()
   local vehicles = career_modules_inventory.getVehicles()
   local storedLocation = {}
-  for id, vehicle in pairs(vehicles) do -- Builds stored location table
-      if vehicle.location then
-          if not storedLocation[vehicle.location] then
-              storedLocation[vehicle.location] = {}
-          end
-          table.insert(storedLocation[vehicle.location], id) -- Adds vehicle to location
+  for id, vehicle in pairs(vehicles) do
+    if vehicle.location then
+      if not storedLocation[vehicle.location] then
+        storedLocation[vehicle.location] = {}
       end
+      table.insert(storedLocation[vehicle.location], id)
+    end
   end
   return storedLocation
 end
@@ -274,17 +276,18 @@ local function getGarageCapacityData()
     if owned then
       local garage = freeroam_facilities.getFacility("garage", garageId)
       local capacity = garageSize[tostring(garageId)]
-      if not capacity and garage and garage.capacity then
-        capacity = math.ceil(garage.capacity / (career_modules_hardcore.isHardcoreMode() and 2 or 1))
+      if (not capacity) and garage and garage.capacity then
+        local baseCapacity = math.ceil(garage.capacity / (career_modules_hardcore.isHardcoreMode() and 2 or 1))
+        capacity = baseCapacity + getExpansionBonusSlots(garageId)
       end
       local vehiclesInGarage = storedLocation[garageId]
       local count = vehiclesInGarage and #vehiclesInGarage or 0
 
       data[tostring(garageId)] = {
-        id = garageId,
-        name = garage and garage.name or tostring(garageId),
+        id       = garageId,
+        name     = garage and garage.name or tostring(garageId),
         capacity = capacity or 0,
-        count = count
+        count    = count
       }
     end
   end
@@ -304,9 +307,8 @@ local function isGarageSpace(garage)
   if not garageSize[garage] then
     buildGarageSizes()
     if not garageSize[garage] then return {false, 0} end
-  end -- No size for garage
+  end
   local storedLocation = getStoredLocations()
-
   local carsInGarage
   if not storedLocation[garage] or storedLocation[garage] == {} then
     carsInGarage = 0
@@ -321,11 +323,11 @@ local function getFreeSlots()
   for garage, owned in pairs(purchasedGarages) do
     if not owned then goto continue end
     local space = isGarageSpace(garage)
-    if space[1] then 
+    if space[1] then
       totalCapacity = totalCapacity + space[2]
     end
     ::continue::
-  end  
+  end
   return totalCapacity
 end
 
@@ -359,20 +361,17 @@ local function getGaragePrice(garageId, computerId)
     if career_modules_hardcore.isHardcoreMode() then
       return garage.defaultPrice * 0.75
     else
-      -- Check if this garage is a starting garage in an active challenge
       if career_challengeModes and career_challengeModes.isChallengeActive() then
         local activeChallenge = career_challengeModes.getActiveChallenge()
         if activeChallenge and activeChallenge.startingGarages then
           for _, startingGarageId in ipairs(activeChallenge.startingGarages) do
             if startingGarageId == garageId then
-              -- This garage is selected as a starting garage, charge full price
               log("D", "garageManager", "getGaragePrice: Garage " .. garageId .. " is challenge starting garage, charging full price: " .. garage.defaultPrice)
               return tonumber(garage.defaultPrice)
             end
           end
         end
       end
-      
       local price = garage.starterGarage and 0 or garage.defaultPrice
       log("D", "garageManager", "getGaragePrice: Garage " .. garageId .. " price: " .. price .. " (starterGarage: " .. tostring(garage.starterGarage) .. ")")
       return tonumber(price) * 0.75
@@ -390,11 +389,11 @@ local function canSellGarage(computerId)
   if not garage then
     return false
   end
-  
+
   if garage.starterGarage then
     return {false, 0}
   end
-  
+
   if career_challengeModes and career_challengeModes.isChallengeActive() then
     local activeChallenge = career_challengeModes.getActiveChallenge()
     if activeChallenge and activeChallenge.startingGarages then
@@ -405,9 +404,10 @@ local function canSellGarage(computerId)
       end
     end
   end
-  
+
   local space = isGarageSpace(garageId)
-  local capacity = math.ceil(garage.capacity / (career_modules_hardcore.isHardcoreMode() and 2 or 1))
+  local baseCapacity = math.ceil(garage.capacity / (career_modules_hardcore.isHardcoreMode() and 2 or 1))
+  local capacity = baseCapacity + getExpansionBonusSlots(garageId)
   return {space[2] == capacity, capacity - space[2]}
 end
 
@@ -420,11 +420,11 @@ local function sellGarage(computerId, sellPrice)
   if not garage then
     return false
   end
-  
+
   if garage.starterGarage then
     return false
   end
-  
+
   if career_challengeModes and career_challengeModes.isChallengeActive() then
     local activeChallenge = career_challengeModes.getActiveChallenge()
     if activeChallenge and activeChallenge.startingGarages then
@@ -435,7 +435,7 @@ local function sellGarage(computerId, sellPrice)
       end
     end
   end
-  
+
   guihooks.trigger('ChangeState', {state = 'play'})
   purchasedGarages[garageId] = nil
   reloadRecoveryPrompt()
@@ -452,7 +452,7 @@ end
 local function getNextAvailableSpace()
   for garage, owned in pairs(purchasedGarages) do
     if not owned then goto continue end
-    if isGarageSpace(garage)[1] then 
+    if isGarageSpace(garage)[1] then
       return garage
     end
     ::continue::
@@ -471,7 +471,6 @@ end
 M.onWorldReadyState = onWorldReadyState
 
 M.purchaseDefaultGarage = purchaseDefaultGarage
-
 M.showPurchaseGaragePrompt = showPurchaseGaragePrompt
 M.requestGarageData = requestGarageData
 M.canPay = canPay
@@ -495,7 +494,6 @@ M.onSaveCurrentSaveSlot = onSaveCurrentSaveSlot
 M.garageIdToName = garageIdToName
 M.computerIdToGarageId = computerIdToGarageId
 
--- Localization
 M.isGarageSpace = isGarageSpace
 M.getNextAvailableSpace = getNextAvailableSpace
 M.buildGarageSizes = buildGarageSizes
