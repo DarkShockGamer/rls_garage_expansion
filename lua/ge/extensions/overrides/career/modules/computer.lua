@@ -12,46 +12,58 @@ local computerFacilityName
 local menuData = {}
 local aiSelection = { active = false, title = "", rows = {}, onSelect = nil }
 
+-- DISABLED: Automatic menu reopening removed to prevent soft-locks on save load.
+-- Menu refreshes now only happen in response to explicit user button clicks.
 -- Defensive menu reopening: only reopen if computerId is valid and not already in a reopen cycle.
 -- This prevents infinite loops and ensures the menu only refreshes in response to user actions.
 local reopenInProgress = false
 local function reopenMenu()
-	if reopenInProgress then
-		-- Prevent overlapping/recursive reopenMenu calls
-		return
-	end
-	if not computerId then
-		-- Defensive check: if computerId is nil, we cannot reopen the menu
-		return
-	end
-	reopenInProgress = true
-	career_career.closeAllMenus()
-	extensions.core_jobsystem.create(function(job)
-		job.sleep(0.1)  -- Brief delay to allow UI state to settle
-		-- Double-check computerId is still valid before reopening
-		if computerId then
-			career_modules_computer.openComputerMenuById(computerId)
-		end
-		reopenInProgress = false
-	end)
+	print("[computer.lua] reopenMenu() called - DISABLED to prevent automatic refresh loops")
+	-- DISABLED: All automatic menu refresh logic has been disabled.
+	-- This function is now a no-op to prevent soft-locking during save game loading.
+	-- Menu refreshes should only occur from explicit user button callbacks.
+	return
+	
+	-- OLD CODE (DISABLED):
+	-- if reopenInProgress then
+	-- 	-- Prevent overlapping/recursive reopenMenu calls
+	-- 	return
+	-- end
+	-- if not computerId then
+	-- 	-- Defensive check: if computerId is nil, we cannot reopen the menu
+	-- 	return
+	-- end
+	-- reopenInProgress = true
+	-- career_career.closeAllMenus()
+	-- extensions.core_jobsystem.create(function(job)
+	-- 	job.sleep(0.1)  -- Brief delay to allow UI state to settle
+	-- 	-- Double-check computerId is still valid before reopening
+	-- 	if computerId then
+	-- 		career_modules_computer.openComputerMenuById(computerId)
+	-- 	end
+	-- 	reopenInProgress = false
+	-- end)
 end
 
 -- openSelection creates a UI overlay for selecting from a list (workers, vehicles, etc.)
--- The onSelect callback is wrapped to clear the selection state and reopen the menu.
--- This ensures that AI assignment actions cause the menu to refresh only after user interaction.
+-- The onSelect callback is wrapped to clear the selection state.
+-- DISABLED automatic reopenMenu() call to prevent refresh loops during save load.
 local function openSelection(title, rows, onSelect)
+  print("[computer.lua] openSelection() called with title: " .. tostring(title))
   aiSelection.active = true
   aiSelection.title = title
   aiSelection.rows = rows or {}
   aiSelection.onSelect = function(val)
+    print("[computer.lua] openSelection onSelect callback triggered with value: " .. tostring(val))
     aiSelection.active = false
     if onSelect then onSelect(val) end
-    -- Reopen menu after selection to show updated state
-    reopenMenu()
+    -- DISABLED: Automatic menu reopen removed to prevent soft-locks
+    -- reopenMenu()
   end
 end
 
 local function openMenu(computerFacility, resetActiveVehicleIndex, activityElement)
+  print("[computer.lua] openMenu() called for facility: " .. tostring(computerFacility and computerFacility.id or "nil"))
   computerFunctions = {general = {}, vehicleSpecific = {}}
   computerId = computerFacility.id
   computerFacilityName = computerFacility.name
@@ -234,14 +246,17 @@ local function openMenu(computerFacility, resetActiveVehicleIndex, activityEleme
   }
 
   if aiSelection.active and aiSelection.rows and #aiSelection.rows > 0 then
+    print("[computer.lua] openMenu() - Building AI selection menu with " .. #aiSelection.rows .. " rows")
     computerFunctions.general["ai_back"] = {
       id = "ai_back",
       label = "Back",
       icon = "arrow-left",
       order = 100,
       callback = function()
+        print("[computer.lua] AI back button clicked - clearing selection")
         aiSelection.active = false
-        reopenMenu()
+        -- DISABLED: Automatic menu reopen removed to prevent soft-locks
+        -- reopenMenu()
       end,
     }
     computerFunctions.general["ai_header"] = {
@@ -278,6 +293,7 @@ local function openMenu(computerFacility, resetActiveVehicleIndex, activityEleme
 end
 
 local function computerButtonCallback(buttonId, inventoryId)
+  print("[computer.lua] computerButtonCallback() called - buttonId: " .. tostring(buttonId) .. ", inventoryId: " .. tostring(inventoryId))
   local functionData
   if inventoryId then
     functionData = computerFunctions.vehicleSpecific[inventoryId][buttonId]
@@ -290,6 +306,7 @@ local function computerButtonCallback(buttonId, inventoryId)
 end
 
 local function getComputerUIData()
+  print("[computer.lua] getComputerUIData() called")
   local data = {}
   local invVehicles = career_modules_inventory.getVehicles()
   local computerFunctionsForUI = deepcopy(computerFunctions)
@@ -321,14 +338,17 @@ local function getComputerUIData()
 end
 
 local function onMenuClosed()
+  print("[computer.lua] onMenuClosed() called")
   if tether then tether.remove = true tether = nil end
 end
 
 local function closeMenu()
+  print("[computer.lua] closeMenu() called")
   career_career.closeAllMenus()
 end
 
 local function openComputerMenuById(id)
+  print("[computer.lua] openComputerMenuById() called with id: " .. tostring(id))
   local computer = freeroam_facilities.getFacility("computer", id)
   M.openMenu(computer)
 end

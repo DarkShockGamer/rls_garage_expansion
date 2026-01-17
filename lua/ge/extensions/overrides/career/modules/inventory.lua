@@ -171,7 +171,11 @@ local function time_since(datetime)
 end
 
 local function onExtensionLoaded()
-  if not career_career.isActive() then return false end
+  print("[inventory.lua] onExtensionLoaded() called")
+  if not career_career.isActive() then 
+    print("[inventory.lua] onExtensionLoaded() - career not active, returning")
+    return false 
+  end
 
   -- load from saveslot
   local saveSlot, savePath = career_saveSystem.getCurrentSaveSlot()
@@ -708,7 +712,9 @@ end
 
 local saveCareer
 local function setupInventory(levelPath)
+    print("[inventory.lua] setupInventory() called with levelPath: " .. tostring(levelPath))
     local saveSlot, savePath = career_saveSystem.getCurrentSaveSlot()
+    print("[inventory.lua] setupInventory() - saveSlot: " .. tostring(saveSlot) .. ", savePath: " .. tostring(savePath))
     local data = jsonReadFile(savePath .. "/info.json")
     local generalData = jsonReadFile(savePath .. "/career/general.json")
     local levelName = generalData and generalData.level or getCurrentLevelIdentifier()
@@ -719,7 +725,9 @@ local function setupInventory(levelPath)
   end
 
     if career_modules_linearTutorial.getLinearStep() == -1 then
+        print("[inventory.lua] setupInventory() - linear tutorial step is -1, processing vehicles")
         if loadedVehiclesLocations then
+            print("[inventory.lua] setupInventory() - loadedVehiclesLocations exists, processing " .. tableSize(loadedVehiclesLocations) .. " vehicles")
             local vehiclesToTeleportToGarage = {}
             for inventoryId, location in pairs(loadedVehiclesLocations) do
                 local vehInfo = vehicles[inventoryId]
@@ -766,10 +774,13 @@ local function setupInventory(levelPath)
         end
 
         if vehicleToEnterId and inventoryIdToVehId[vehicleToEnterId] then
+            print("[inventory.lua] setupInventory() - entering vehicle: " .. tostring(vehicleToEnterId))
             enterVehicle(vehicleToEnterId)
         else
+            print("[inventory.lua] setupInventory() - setting walking mode (no vehicleToEnterId or vehicle not spawned)")
             gameplay_walk.setWalkingMode(true)
         end
+        print("[inventory.lua] setupInventory() - calling onSetupInventoryFinished hook")
         extensions.hook("onSetupInventoryFinished")
     end
 
@@ -904,7 +915,9 @@ local function setupInventory(levelPath)
 end
 
 local function onCareerModulesActivated(alreadyInLevel)
+  print("[inventory.lua] onCareerModulesActivated() called with alreadyInLevel: " .. tostring(alreadyInLevel))
   if sellAllVehicles then
+    print("[inventory.lua] onCareerModulesActivated() - processing sellAllVehicles")
     for inventoryId, vehicle in pairs(vehicles) do
       if vehicle.owned then
         M.sellVehicle(inventoryId)
@@ -918,11 +931,13 @@ local function onCareerModulesActivated(alreadyInLevel)
     sellAllVehicles = nil
   end
   if alreadyInLevel then
+    print("[inventory.lua] onCareerModulesActivated() - calling setupInventory()")
     setupInventory()
   end
 end
 
 local function onClientStartMission(levelPath)
+  print("[inventory.lua] onClientStartMission() called with levelPath: " .. tostring(levelPath))
   setupInventory()
 end
 
@@ -1234,6 +1249,7 @@ local function getVehicleUiData(inventoryId, inventoryIdsInGarage)
 end
 
 local function sendDataToUi()
+  print("[inventory.lua] sendDataToUi() called")
   menuIsOpen = true
   local data = {vehicles = {}}
   data.menuHeader = menuHeader
@@ -1356,6 +1372,7 @@ local function onScreenFadeState(state)
 end
 
 local function openMenu(_chooseButtonsData, header, _buttonsActive)
+  print("[inventory.lua] openMenu() called with header: " .. tostring(header))
   buttonsActive = _buttonsActive or {}
   if buttonsActive.repairEnabled == nil then buttonsActive.repairEnabled = true end
   if buttonsActive.sellEnabled == nil then buttonsActive.sellEnabled = true end
@@ -1378,25 +1395,31 @@ local function openMenu(_chooseButtonsData, header, _buttonsActive)
 end
 
 local function closeMenu()
+  print("[inventory.lua] closeMenu() called")
   if closeMenuCallback then
+    print("[inventory.lua] closeMenu() - executing closeMenuCallback")
     closeMenuCallback()
   else
     career_career.closeAllMenus()
+    -- DISABLED: Automatic computer menu reopen removed to prevent soft-locks during save load.
+    -- Menu should only reopen when explicitly triggered by user button clicks.
     -- Defensive check: only reopen computer menu if career_modules_computer is loaded
     -- and computerId is valid. This prevents errors if the menu is closed before
     -- the computer module is fully initialized or if no computer is active.
-    if career_modules_computer and career_modules_computer.getComputerId and career_modules_computer.openComputerMenuById then
-      local currentComputerId = career_modules_computer.getComputerId()
-      if currentComputerId then
-        extensions.core_jobsystem.create(function(job)
-          job.sleep(0.1)  -- Brief delay to allow UI state to settle
-          -- Double-check the computer module is still available
-          if career_modules_computer and career_modules_computer.openComputerMenuById then
-            career_modules_computer.openComputerMenuById(currentComputerId)
-          end
-        end)
-      end
-    end
+    print("[inventory.lua] closeMenu() - DISABLED automatic computer menu reopen to prevent soft-locks")
+    -- OLD CODE (DISABLED):
+    -- if career_modules_computer and career_modules_computer.getComputerId and career_modules_computer.openComputerMenuById then
+    --   local currentComputerId = career_modules_computer.getComputerId()
+    --   if currentComputerId then
+    --     extensions.core_jobsystem.create(function(job)
+    --       job.sleep(0.1)  -- Brief delay to allow UI state to settle
+    --       -- Double-check the computer module is still available
+    --       if career_modules_computer and career_modules_computer.openComputerMenuById then
+    --         career_modules_computer.openComputerMenuById(currentComputerId)
+    --       end
+    --     end)
+    --   end
+    -- end
   end
 end
 
@@ -1449,6 +1472,7 @@ local function deliverAndReplace(inventoryId)
 end
 
 local function openMenuFromComputer(_originComputerId)
+  print("[inventory.lua] openMenuFromComputer() called with originComputerId: " .. tostring(_originComputerId))
   originComputerId = _originComputerId
   openMenu(
     {
@@ -1625,7 +1649,11 @@ local function getFavoriteVehicle()
 end
 
 local function onComputerAddFunctions(menuData, computerFunctions)
-  if not menuData.computerFacility.functions["vehicleInventory"] then return end
+  print("[inventory.lua] onComputerAddFunctions() called")
+  if not menuData.computerFacility.functions["vehicleInventory"] then 
+    print("[inventory.lua] onComputerAddFunctions() - vehicleInventory not in functions, returning")
+    return 
+  end
 
   local computerFunctionData = {
     id = "vehicleInventory",
